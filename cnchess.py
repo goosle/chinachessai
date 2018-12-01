@@ -10,11 +10,11 @@ from MCTS import MCTSPlayer
 from cnnet import PoliceValueNet
 from configdata import *
 
-
+ 
 
 SCREENRECT = pyg.Rect(0, 0, 720, 800)
        
-
+#load image
 def load_image(file):
     "loads an image, prepares it for play"
     main_dir = os.path.split(os.path.abspath(__file__))[0]
