@@ -173,7 +173,7 @@ class MCTS(object):
         """
         for n in range(self._n_playout):
             state_copy = copy.deepcopy(state)
-            print('_playout =',n)
+            #print('_playout =',n)
             self._playout(state_copy)
         return max(self._root._children.items(),
                    key=lambda act_node: act_node[1]._n_visits)[0]
@@ -194,7 +194,7 @@ class MCTS(object):
 
 class MCTSPlayer(object):
     """AI player based on MCTS"""
-    def __init__(self, playerNum,c_puct=5, n_playout=100):
+    def __init__(self, playerNum,c_puct=5, n_playout=1000):
         self.mcts = MCTS(policy_value_fn, c_puct, n_playout)
         self.player = playerNum
 
@@ -211,7 +211,7 @@ class MCTSPlayer(object):
             self.mcts.update_with_move(-1)
             return move
         else:
-            print("WARNING: the board is full")
+            print("WARNING: the board is full,can't move")
             return 0
 
     def __str__(self):

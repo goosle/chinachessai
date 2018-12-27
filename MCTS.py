@@ -36,10 +36,17 @@ class TreeNode(object):
         actProbs: a list of tuples of actions and their prior probability
             according to the policy function.
         """
-        
+        #maxProb = 0 
+        #selAct = 0
         for action,prob in actProbs :
+            '''
+            if prob > maxProb :
+                maxProb = prob
+                selAct = action
+            '''
             if action not in self._children:
                 self._children[action] = TreeNode(self, prob)
+        #return selAct
 
     def select(self, c_puct):
         """Select action among children that gives maximum action value Q
@@ -105,10 +112,11 @@ class MCTS(object):
         self._n_playout = n_playout
 
     def doMove(self,state,action):
-        state.doMove(action)
+        killedID = state.doMove(action)
         state.exchangeTurn()
         state.getAllMoves()
-
+        return killedID
+         
     def _playout(self, state):
         """Run a single playout from the root to the leaf, getting a value at
         the leaf and propagating it back through its parents.
@@ -116,25 +124,33 @@ class MCTS(object):
         """
         node = self._root
         action = 0
+        killedID = 0
+        testcount = 0
         while(1):
-            if node.is_leaf():
-                print("playout select act =",action//100,action%100)
+            if node.is_leaf():  
+                           
                 break
+            testcount += 1
             # Greedily select next move.
             action, node = node.select(self._c_puct)
-            self.doMove(state,action)
+            killedID = self.doMove(state,action)
             
 
         # Evaluate the leaf using a network which outputs a list of
         # (action, probability) tuples p and also a score v in [-1, 1]
         # for the current player.
-        actProbs, leaf_value = self._policy(state)
-        #print("probs len =",len(list(action_probs)))
-        #print("leaf_value=",leaf_value)
+        actProbs, leaf_value = self._policy(state)        
         # Check for end of game.
-        end, winner = state.isEnd()
+        winner,end = state.isEnd()
         if not end:
-            
+            if killedID != 0:
+                killedType = abs(killedID) // 10
+                killValue= {1:1,2:0.025,3:0.025,4:0.075,5:0.15,6:0.075,7:0.001}
+                v = killValue[killedType]
+                leaf_value += v
+                if(leaf_value>0.95):
+                    leaf_value = 0.95
+                #traceDebug("kill bound = %f,v=%f"%(v,leaf_value),2)
             node.expand(actProbs)
         else:
             # for end state，return the "true" leaf_value
@@ -146,6 +162,7 @@ class MCTS(object):
                 )
 
         # Update value and visit count of nodes in this traversal.
+        
         node.update_recursive(-leaf_value)
 
     def get_move_probs(self, state, temp=1e-3):
@@ -154,19 +171,17 @@ class MCTS(object):
         state: the current game state
         temp: temperature parameter in (0, 1] controls the level of exploration
         """
-        for n in range(self._n_playout):
-            if n % 100 == 0:
-                print('.',end='')
-            sys.stdout.flush()
+        traceDebug("playout start",2)
+        for n in range(self._n_playout):           
             state_copy = copy.deepcopy(state)
             self._playout(state_copy)
-
+        traceDebug("playout end",2)
         # calc the move probabilities based on visit counts at the root node
         act_visits = [(act, node._n_visits)
                       for act, node in self._root._children.items()]
         acts, visits = zip(*act_visits)
-        act_probs = softmax(1.0/temp * np.log(np.array(visits) + 1e-10))
-
+        #act_probs1 = softmax(1.0/temp * np.log(np.array(visits) + 1e-10))
+        act_probs = softmax(visits)
         return acts, act_probs
 
     def update_with_move(self, last_move):
@@ -217,8 +232,6 @@ class MCTSPlayer(object):
                 move = np.random.choice(acts, p=probs)
                 # reset the root node
                 self.mcts.update_with_move(-1)
-#                location = board.move_to_location(move)
-#                print("AI move: %d,%d\n" % (location[0], location[1]))
 
             if return_prob:
                 move_probs = np.zeros(ACTION_PROB)
@@ -228,7 +241,7 @@ class MCTSPlayer(object):
             else:
                 return move
         else:
-            print("WARNING: the board is full")
+            traceWarn("WARNING: the board is full,can't move")
 
     def __str__(self):
         return "MCTS {}".format(self.player)

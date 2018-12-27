@@ -10,6 +10,41 @@ my_obj_init_pos  = [94, 93, 95 ,92 ,96 ,91, 97, 90, 98, 71,77,60,62,64,66,68]# r
 black_obj_init_list = [-11,-21,-22,-31,-32,-41,-42,-51,-52,-61,-62,-71,-72,-73,-74,-75]
 op_obj_init_pos  = [4, 3, 5 ,2 ,6 ,1, 7, 0, 8, 21,27,30,32,34,36,38]# row(0,8),col(0,9)
 
+def actMinorLR(act):
+    start  = act // 100
+    lr = start // 10
+    lc = start % 10
+    start = lr*10 +(8-lc)
+    end  = act % 100
+    lr = end // 10
+    lc = end % 10
+    end = lr*10 +(8-lc)
+    return start*100+end     
+
+def actMinorFB(act):
+    start  = act // 100
+    lr = start // 10
+    lc = start % 10
+    start = (9-lr)*10 +lc
+    end  = act % 100
+    lr = end // 10
+    lc = end % 10
+    end = (9-lr)*10 +lc
+    return start*100+end
+
+def  setStateToDataset(state,act,winner,dataset):
+    availActs =  state.getAllMoves()
+    actIndexs =  state.decodeActs(availActs)
+    actIndex =  state.decodeMove(act)                
+    probs = np.zeros([ACTION_PROB]) 
+    probs[actIndexs]  = 0.01
+    probs[actIndex] = 0.99
+    value = 1 if state.curTurn == winner else -1 
+    iState = state.currentState()
+    
+    dataset.states.append(iState)
+    dataset.probs.append(probs)
+    dataset.winners.append(value)
 
 class State:
     def __init__(self,whereAmI):
@@ -26,7 +61,7 @@ class State:
         self.board =  np.zeros([BOARD_ROWS,BOARD_COLS])
         self.curTurn = RED_PLAYER_NUM
         self.whereAmI = whereAmI
-
+        self.winner = 0
         self.round = 0
         self.availables = []
         self.pitchs = {}
@@ -45,10 +80,38 @@ class State:
         for id,pos in enumerate(op_obj_init_pos):
             board[pos//10][pos%10] = opobjlist[id]
         self.setPicths()
-        print("state reset ok")  
+
+    
+            
+
+    def minorLR(self):
+        self.board[:,:] = 0
+        for objid,objpos in self.pitchs.items():
+            r = objpos // 10
+            c = objpos % 10
+            nc = (8- c) 
+            self.pitchs[objid] = r*10+nc  
+            self.board[r][nc] = objid
+        if self.lastStep > 0:           
+            self.lastStep = actMinorLR(self.lastStep)
+            
+
+    def minorFB(self):
+        self.board[:,:] = 0
+        for objid,objpos in self.pitchs.items():
+            r = objpos // 10
+            c = objpos % 10
+            nr = (9- r) 
+            self.pitchs[objid] = nr*10+c  
+            self.board[nr][c] = objid
+        self.whereAmI = - self.whereAmI
+           
+        if self.lastStep > 0:    
+            self.lastStep = actMinorFB(self.lastStep)
+                    
 
     def exchangeTurn(self):
-        self.curTurn =RED_PLAYER_NUM if self.curTurn == BLACK_PLAYER_NUM else BLACK_PLAYER_NUM
+        self.curTurn = -self.curTurn#RED_PLAYER_NUM if self.curTurn == BLACK_PLAYER_NUM else BLACK_PLAYER_NUM
  
     def kingClosedMe(self,objId):
         return objId * self.whereAmI > 0
@@ -169,16 +232,17 @@ class State:
 
         
     def checkValids(self,srcid,srcPos,valids):
-        def directFace(pos1,pos2):
+        def directFaceCount(pos1,pos2):
             r1 = min(pos1// 10,pos2// 10) 
             r2 = max(pos1// 10,pos2// 10)                
             cpos = pos1 % 10 
-            hasChess = False 
+            hasChessCount = 0 
             for rpos in range(r1+1,r2):
                 if self.board[rpos][cpos]!= 0:
-                    hasChess = True
-                    break
-            return not hasChess
+                    hasChessCount += 1
+                    if hasChessCount > 1 :
+                        break
+            return hasChessCount
         
         newvalids = copy.deepcopy(valids)
         kingID = 11 if self.curTurn==RED_PLAYER_NUM else -11
@@ -192,16 +256,19 @@ class State:
             for mov in valids :
                 dstpos = mov % 100
                 if dstpos % 10  == opKingPos % 10 : 
-                    if directFace(dstpos,opKingPos):
+                    if directFaceCount(dstpos,opKingPos)==0:
                         newvalids.remove(mov)        
         elif  ( srcPos %10 == kingPos % 10) and(kingPos % 10 == opKingPos % 10 ):
-                if directFace(kingPos,opKingPos):
-                    newvalids.remove(mov) 
+                if directFaceCount(kingPos,opKingPos) == 1:
+                    for mov in valids :
+                        dstpos = mov % 100
+                        if( dstpos% 10  != opKingPos % 10):
+                            newvalids.remove(mov) 
         return newvalids
 
     def getValidMoves(self,objid,objPos,checkValids = True):
         if (objid==0):
-            print("found a buf ,objid===0")
+            traceError("found a buf ,objid===0")
             return []
         absobjid = abs(objid)
         objType =  absobjid // 10
@@ -261,7 +328,7 @@ class State:
             baseLayer = 12+objCount-1
             valids = self.getCommonValidMoves(objid,objPos,objGroup,mvs,[],0,9,0,8)
         else :
-            print( 'error objtype = %d',objType)
+            traceError( 'error objtype = %d'%(objType))
         if checkValids :
             valids = self.checkValids(objid,objPos,valids)
   
@@ -379,7 +446,7 @@ class State:
             result = None
         
         if (result == None):
-            print("error chess type")
+            traceError("error chess type")
         return result
 
     def decodeActs(self,acts):      
@@ -389,28 +456,27 @@ class State:
             dAvailables.append(dmove)
         return dAvailables    
 
-    def isEnd(self):
-        winner = 0
+    def isEnd(self):        
         result = False
         kingID = 11 if self.curTurn==RED_PLAYER_NUM else -11
         kingPos = self.pitchs.get(kingID,-1)
         opKingPos = self.pitchs.get(-kingID,-1)
         if( -1 == kingPos):
             result = True
-            winner = -self.curTurn
-            print("game over,myking is killed, winner=%d"%(winner))
-            return winner,result
+            self.winner = -self.curTurn
+            traceDebug("game over,myking is killed, winner=%d"%(self.winner),2)
+            return self.winner,result
         if( -1 == opKingPos):
             result = True
-            winner = self.curTurn
-            print("game over,opking is killed, winner=%d"%(winner))
-            return winner,result
-        if self.round > 1200 :
-            print ("game over , round > 1200")
-            winner = 0
+            self.winner = self.curTurn
+            traceDebug("game over,opking is killed, winner=%d"%(self.winner),2)
+            return self.winner,result
+        if self.round > 120 :
+            traceDebug ("game over , round > 120 no chess was killed",2)
+            self.winner = 0
             result = True
-       
-        return winner,result 
+        
+        return self.winner ,result 
 
 
     def doMove(self,action):
@@ -428,31 +494,47 @@ class State:
         self.round += 1
         self.pitchs[srcid]=mEnd
         if(srcid ==0):
-            print("found srcid == 0")
-            return 
+            traceError("found srcid == 0")
+            return 0
         if(dstid != 0):
             self.killObj(dstid,mEnd)
+            return dstid
         self.lastStep = action
+        return 0
 
     def killObj(self,objid,objPos):        
         self.pitchs.pop(objid,-1)
         self.round = 0
-        #print("%d:%d was killed"%(objid,objPos))  
+         
 
     def currentState(self):
-        #input  输入：己方棋子布局，0
-        #       我方每个棋子的有效行走图，死棋全为0，共16个平面 1-16
-        #       对方棋子布局 17
-        #       对方上次移动的位置，18
-        #       共19个平面
+        #input  输入：
+        # 0,who am i
+        # 1,cur turn
+        # 2,己方棋子布局
+        # 3-19我方每个棋子的有效行走图，死棋全为0，共16个平面 1-16
+        # 20 对方棋子布局 
+        # 21 对方上次移动的位置
+        # 共21个平面
         board = self.board
-        inputImage = np.zeros([19,BOARD_ROWS,BOARD_COLS])
-        if ( self.curTurn == RED_PLAYER_NUM):
-            a = np.where(board > 0,1,0)
+        inputImage = np.zeros([INPUT_LAYER,BOARD_ROWS,BOARD_COLS])
+        #0 where am i
+        if( self.whereAmI == RED_PLAYER_NUM ):
+            inputImage[0] = 1
         else :
-            a = np.where(board < 0,1,0)
-        inputImage[0] = a
+            inputImage[0] = 0
+        #1 curTurn
+        if ( self.curTurn == self.whereAmI):
+           inputImage[1] =  1
+        else :
+           inputImage[1] = 0
+        #2 the pos of me 
+        if ( self.curTurn == RED_PLAYER_NUM):
+            inputImage[2] = np.where(board > 0,1,0)
+        else :
+            inputImage[2] = np.where(board < 0,1,0)
         
+        #3-19 my valid moves each chess
         for objid,objpos in self.pitchs.items() :
             playerNum = RED_PLAYER_NUM if objid > 0 else BLACK_PLAYER_NUM
             if playerNum != self.curTurn :
@@ -460,22 +542,21 @@ class State:
             layer,valids = self.getValidMoves(objid,objpos)
             for pos in valids:
                 pos = pos % 100
-                inputImage[layer][pos // 10][pos  % 10] = 1
+                inputImage[2+layer][pos // 10][pos  % 10] = 1
 
         #对方棋子布局，
         if ( self.curTurn == RED_PLAYER_NUM):
-            a = np.where(board < 0,1,0)
+            inputImage[19]  = np.where(board < 0,1,0)
         else :
-            a = np.where(board > 0,1,0)
-        inputImage[17] = a
-
+            inputImage[19] = np.where(board > 0,1,0)
+        
         #last move
         if self.lastStep == -1 :
-            inputImage[18] = 0
+            inputImage[20] = 0
         else :
             step = self.lastStep
             pos = step // 100
-            inputImage[18][pos // 10][pos%10] = 1    
-        #print(inputImage)
+            inputImage[20][pos // 10][pos%10] = 1  
+               
         return inputImage
                    
